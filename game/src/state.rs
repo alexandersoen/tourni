@@ -1,19 +1,38 @@
 #[derive(Copy, Clone, PartialEq, Debug)]
 enum Piece {
-    O, X, Nil,
+    O,
+    X,
+    Nil,
+}
+
+impl Piece {
+    fn to_player(&self) -> Option<Player> {
+        match self {
+            Piece::O => Some(Player::Player1),
+            Piece::X => Some(Player::Player2),
+            Piece::Nil => None,
+        }
+    }
 }
 
 #[derive(Debug)]
-pub enum Turn {
+pub enum Player {
     Player1,
     Player2,
 }
 
-impl Turn {
+impl Player {
     fn next(&self) -> Self {
         match self {
-            Turn::Player1 => Turn::Player2,
-            Turn::Player2 => Turn::Player1,
+            Player::Player1 => Player::Player2,
+            Player::Player2 => Player::Player1,
+        }
+    }
+
+    fn to_piece(&self) -> Option<Piece> {
+        match self {
+            Player::Player1 => Some(Piece::O),
+            Player::Player2 => Some(Piece::X),
         }
     }
 }
@@ -30,14 +49,14 @@ impl BoardState {
 #[derive(Debug)]
 pub struct GameState {
     board: BoardState,
-    turn: Turn,
+    turn: Player,
 }
 
 impl GameState {
     pub fn new() -> Self {
         GameState {
             board: BoardState([Piece::Nil; 9]),
-            turn: Turn::Player1,
+            turn: Player::Player1,
         }
     }
 
@@ -46,14 +65,42 @@ impl GameState {
             return Err("Invalid move".to_string());
         }
 
-        let piece = match self.turn {
-            Turn::Player1 => Piece::O,
-            Turn::Player2 => Piece::X,
-        };
+        let piece = self
+            .turn
+            .to_piece()
+            .ok_or("Unidentifiable piece".to_string())?;
 
         self.board.0[m as usize] = piece;
         self.turn = self.turn.next();
 
         Ok(())
+    }
+
+    pub fn winner(&self) -> Option<Player> {
+        if self.board.0[0] == self.board.0[1] && self.board.0[0] == self.board.0[2] {
+            return self.board.0[0].to_player();
+        }
+
+        if self.board.0[0] == self.board.0[3] && self.board.0[0] == self.board.0[6] {
+            return self.board.0[0].to_player();
+        }
+
+        if self.board.0[2] == self.board.0[5] && self.board.0[2] == self.board.0[8] {
+            return self.board.0[2].to_player();
+        }
+
+        if self.board.0[6] == self.board.0[7] && self.board.0[6] == self.board.0[8] {
+            return self.board.0[6].to_player();
+        }
+
+        if self.board.0[0] == self.board.0[4] && self.board.0[0] == self.board.0[8] {
+            return self.board.0[0].to_player();
+        }
+
+        if self.board.0[2] == self.board.0[4] && self.board.0[2] == self.board.0[6] {
+            return self.board.0[2].to_player();
+        }
+
+        None
     }
 }

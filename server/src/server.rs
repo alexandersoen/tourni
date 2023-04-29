@@ -4,13 +4,15 @@ use connection::{Connection, Id, CHANNEL_BUFFER_SIZE};
 
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{self, Sender, Receiver};
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio_util::sync::CancellationToken;
 
 pub struct ServerState {
     sender: Sender<String>,
     pub receiver: Receiver<String>,
     connections: Vec<Connection>,
     id_counter: Id,
+    cancel_token: CancellationToken,
 }
 
 impl ServerState {
@@ -21,6 +23,7 @@ impl ServerState {
             sender,
             receiver,
             connections: vec![],
+            cancel_token: CancellationToken::new(),
             id_counter: 0,
         }
     }
@@ -38,7 +41,8 @@ impl ServerState {
     pub fn run_connection(&mut self, id: Id) -> Result<(), String> {
         if let Some(idx) = self.connections.iter().position(|c| c.id == id) {
             let sender = self.sender.clone();
-            self.connections[idx].start(sender)?;
+            let cancel_token = self.cancel_token.clone();
+            self.connections[idx].start(sender, cancel_token)?;
             return Ok(());
         }
 
@@ -59,5 +63,13 @@ impl ServerState {
             c.send_msg(msg.clone()).await?;
         }
         Ok(())
+    }
+
+    pub fn shutdown(self) {
+        self.cancel_token.cancel();
+        for c in self.connections {
+            c.shutdown();
+        }
+        drop(self.sender);
     }
 }

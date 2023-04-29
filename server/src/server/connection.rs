@@ -7,6 +7,7 @@ use tokio::net::tcp::WriteHalf;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 pub type Id = u64;
 
@@ -55,7 +56,11 @@ impl Connection {
         Ok(())
     }
 
-    pub fn start(&mut self, server_sender: Sender<String>) -> Result<(), String> {
+    pub fn start(
+        &mut self,
+        server_sender: Sender<String>,
+        cancel_token: CancellationToken,
+    ) -> Result<(), String> {
         if self.running {
             return Err("Connection already running".to_string());
         }
@@ -76,17 +81,27 @@ impl Connection {
                 let recv_msg = receiver.recv();
 
                 tokio::select! {
-                    reader_res = buffer_read => echo(reader_res, &server_sender, &mut buf).await,
+                    reader_res = buffer_read => message_server(reader_res, &server_sender, &mut buf).await,
                     msg_res = recv_msg => listen_others(msg_res, &mut writer).await,
+                    _ = cancel_token.cancelled() => {
+                        shutdown_client(&mut writer).await;
+                        break;
+                    },
                 }
             }
         });
 
         Ok(())
     }
+
+    pub fn shutdown(self) {
+        if let Some(sender) = self.sender {
+            drop(sender);
+        }
+    }
 }
 
-async fn echo<'a>(
+async fn message_server<'a>(
     reader_result: io::Result<usize>,
     server_sender: &Sender<String>,
     buffer: &mut Vec<u8>,
@@ -102,5 +117,12 @@ async fn echo<'a>(
 }
 
 async fn listen_others(msg: Option<String>, writer: &mut WriteHalf<'_>) {
-    writer.write_all(msg.unwrap().as_bytes()).await.unwrap();
+    if let Some(msg) = msg {
+        writer.write_all(msg.as_bytes()).await.unwrap();
+    }
+}
+
+async fn shutdown_client(writer: &mut WriteHalf<'_>) {
+    let shutdown_msg = "Shutting Down".to_string();
+    writer.write_all(shutdown_msg.as_bytes()).await.unwrap();
 }

@@ -9,7 +9,7 @@ use tokio::net::TcpListener;
 #[tokio::main]
 async fn main() {
     let mut server_state = ServerState::new();
-    let listener = TcpListener::bind("localhost:9876").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:9876").await.unwrap();
     let mut game_state = GameState::new();
 
     // Player 1
@@ -50,6 +50,7 @@ async fn main() {
         let msg = server_state.receiver.recv().await.unwrap();
         let m: u8 = msg.trim().parse().unwrap();
 
+        // Parse a move
         match game_state.make_move(m) {
             Ok(()) => server_state
                 .send_global_message(format!("{:?}\n", game_state))
@@ -60,8 +61,21 @@ async fn main() {
                 .await
                 .unwrap(),
         };
+
+        // Check if game finished
+        match game_state.winner() {
+            Some(p) => {
+                server_state
+                    .send_global_message(format!("{:?} Wins!\n", p))
+                    .await
+                    .unwrap();
+                break;
+            }
+            None => {}
+        };
     }
 
+    server_state.shutdown();
     /*
     loop {
         tokio::select! {
