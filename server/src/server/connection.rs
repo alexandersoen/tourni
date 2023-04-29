@@ -1,21 +1,23 @@
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::tcp::WriteHalf;
 use tokio::net::TcpStream;
-use tokio::net::tcp::{ReadHalf, WriteHalf};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
-use tokio::sync::mpsc::{self, Sender};
 
 pub type Id = u64;
 
-const CHANNEL_BUFFER_SIZE: usize = 100;
+pub const CHANNEL_BUFFER_SIZE: usize = 100;
 
 #[allow(dead_code)]
 pub struct Connection {
     pub id: Id,
     address: SocketAddr,
     stream: Arc<Mutex<TcpStream>>,
+    sender: Option<Sender<String>>,
     running: bool,
 }
 
@@ -25,24 +27,58 @@ impl Connection {
             id,
             address,
             stream: Arc::new(Mutex::new(stream)),
+            sender: None,
             running: false,
         }
     }
 
-    pub fn start(&mut self) -> Result<(), String> {
+    fn build_channel(&mut self) -> Result<Receiver<String>, String> {
+        match self.sender {
+            Some(_) => Err("Sender already set".to_string()),
+            None => {
+                let (sender, receiver) = mpsc::channel(CHANNEL_BUFFER_SIZE);
+                self.sender = Some(sender);
+
+                Ok(receiver)
+            }
+        }
+    }
+
+    pub async fn send_msg(&self, msg: String) -> Result<(), String> {
+        self.sender
+            .as_ref()
+            .expect("Sender not initiated")
+            .send(msg.clone())
+            .await
+            .expect("Failed to send message to connection");
+
+        Ok(())
+    }
+
+    pub fn start(&mut self, server_sender: Sender<String>) -> Result<(), String> {
         if self.running {
             return Err("Connection already running".to_string());
         }
         self.running = true;
 
+        let mut receiver = self.build_channel()?;
         let task_stream_mtx = self.stream.clone();
+
         tokio::spawn(async move {
             let mut task_stream = task_stream_mtx.lock().await;
             let (reader, mut writer) = task_stream.split();
             let mut buffer_reader = BufReader::new(reader);
+
             loop {
                 let mut buf = vec![];
-                echo(&mut buffer_reader, &mut writer, &mut buf).await;
+
+                let buffer_read = buffer_reader.read_until(b'\n', &mut buf);
+                let recv_msg = receiver.recv();
+
+                tokio::select! {
+                    reader_res = buffer_read => echo(reader_res, &server_sender, &mut buf).await,
+                    msg_res = recv_msg => listen_others(msg_res, &mut writer).await,
+                }
             }
         });
 
@@ -50,13 +86,21 @@ impl Connection {
     }
 }
 
-async fn echo<'a>(buffer_reader: &mut BufReader<ReadHalf<'_>>, writer: &mut WriteHalf<'_>, buffer: &mut Vec<u8>) {
-    match buffer_reader.read_until(b'\n', buffer).await {
-        Ok(0) => {},
+async fn echo<'a>(
+    reader_result: io::Result<usize>,
+    server_sender: &Sender<String>,
+    buffer: &mut Vec<u8>,
+) {
+    match reader_result {
+        Ok(0) => {}
         Ok(_) => {
             let s = String::from_utf8_lossy(&buffer);
-            writer.write_all(s.as_bytes()).await.unwrap();
-        },
+            server_sender.send(s.to_string()).await.unwrap();
+        }
         Err(e) => panic!("{:?}", e),
     }
+}
+
+async fn listen_others(msg: Option<String>, writer: &mut WriteHalf<'_>) {
+    writer.write_all(msg.unwrap().as_bytes()).await.unwrap();
 }
