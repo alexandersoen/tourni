@@ -45,9 +45,18 @@ impl ServerState {
         Err("Connection does not exist in server".to_string())
     }
 
+    pub async fn send_message(&self, id: Id, msg: String) -> Result<(), String> {
+        if let Some(idx) = self.connections.iter().position(|c| c.id == id) {
+            self.connections[idx].send_msg(msg).await?;
+            return Ok(());
+        }
+
+        Err("Connection does not exist in server".to_string())
+    }
+
     pub async fn send_global_message(&self, msg: String) -> Result<(), String> {
         for c in &self.connections {
-            c.send_msg(msg.clone()).await.unwrap();
+            c.send_msg(msg.clone()).await?;
         }
         Ok(())
     }

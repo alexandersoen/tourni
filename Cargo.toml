@@ -3,4 +3,5 @@ members = [
     "net",
     "server",
     "client",
+    "game",
 ]
