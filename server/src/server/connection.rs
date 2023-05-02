@@ -9,7 +9,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-pub type Id = u64;
+use crate::message::{Id, ClientMessage, ServerMessage};
 
 pub const CHANNEL_BUFFER_SIZE: usize = 100;
 
@@ -18,7 +18,7 @@ pub struct Connection {
     pub id: Id,
     address: SocketAddr,
     stream: Arc<Mutex<TcpStream>>,
-    sender: Option<Sender<String>>,
+    sender: Option<Sender<ServerMessage>>,
     running: bool,
 }
 
@@ -33,7 +33,7 @@ impl Connection {
         }
     }
 
-    fn build_channel(&mut self) -> Result<Receiver<String>, String> {
+    fn build_channel(&mut self) -> Result<Receiver<ServerMessage>, String> {
         match self.sender {
             Some(_) => Err("Sender already set".to_string()),
             None => {
@@ -45,7 +45,7 @@ impl Connection {
         }
     }
 
-    pub async fn send_msg(&self, msg: String) -> Result<(), String> {
+    pub async fn send_msg(&self, msg: ServerMessage) -> Result<(), String> {
         self.sender
             .as_ref()
             .expect("Sender not initiated")
@@ -58,7 +58,7 @@ impl Connection {
 
     pub fn start(
         &mut self,
-        server_sender: Sender<String>,
+        server_sender: Sender<ClientMessage>,
         cancel_token: CancellationToken,
     ) -> Result<(), String> {
         if self.running {
@@ -68,6 +68,8 @@ impl Connection {
 
         let mut receiver = self.build_channel()?;
         let task_stream_mtx = self.stream.clone();
+
+        let id = self.id.clone();
 
         tokio::spawn(async move {
             let mut task_stream = task_stream_mtx.lock().await;
@@ -81,7 +83,7 @@ impl Connection {
                 let recv_msg = receiver.recv();
 
                 tokio::select! {
-                    reader_res = buffer_read => message_server(reader_res, &server_sender, &mut buf).await,
+                    reader_res = buffer_read => message_server(id, reader_res, &server_sender, &mut buf).await,
                     msg_res = recv_msg => listen_others(msg_res, &mut writer).await,
                     _ = cancel_token.cancelled() => {
                         shutdown_client(&mut writer).await;
@@ -102,23 +104,30 @@ impl Connection {
 }
 
 async fn message_server<'a>(
+    id: Id,
     reader_result: io::Result<usize>,
-    server_sender: &Sender<String>,
+    server_sender: &Sender<ClientMessage>,
     buffer: &mut Vec<u8>,
-) {
+    ) {
     match reader_result {
         Ok(0) => {}
         Ok(_) => {
             let s = String::from_utf8_lossy(&buffer);
-            server_sender.send(s.to_string()).await.unwrap();
+            let client_message = ClientMessage {
+                sender: id,
+                message: s.to_string(),
+            };
+
+            server_sender.send(client_message).await.unwrap();
         }
         Err(e) => panic!("{:?}", e),
     }
 }
 
-async fn listen_others(msg: Option<String>, writer: &mut WriteHalf<'_>) {
+
+async fn listen_others(msg: Option<ServerMessage>, writer: &mut WriteHalf<'_>) {
     if let Some(msg) = msg {
-        writer.write_all(msg.as_bytes()).await.unwrap();
+        writer.write_all(msg.message.as_bytes()).await.unwrap();
     }
 }
 

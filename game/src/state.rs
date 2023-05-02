@@ -1,3 +1,5 @@
+use std::slice::Iter;
+
 #[derive(Copy, Clone, PartialEq, Debug)]
 enum Piece {
     O,
@@ -15,13 +17,18 @@ impl Piece {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Player {
     Player1,
     Player2,
 }
 
 impl Player {
+    pub fn iter_all() -> Iter<'static, Self> {
+        static PLAYERS: [Player; 2] = [Player::Player1, Player::Player2];
+        PLAYERS.iter()
+    }
+
     fn next(&self) -> Self {
         match self {
             Player::Player1 => Player::Player2,
@@ -49,7 +56,7 @@ impl BoardState {
 #[derive(Debug)]
 pub struct GameState {
     board: BoardState,
-    turn: Player,
+    pub turn: Player,
 }
 
 impl GameState {

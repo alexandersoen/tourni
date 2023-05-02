@@ -1,15 +1,17 @@
 mod connection;
 
-use connection::{Connection, Id, CHANNEL_BUFFER_SIZE};
+pub use connection::{Connection, CHANNEL_BUFFER_SIZE};
 
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 
+use crate::message::{Id, ClientMessage, ServerMessage};
+
 pub struct ServerState {
-    sender: Sender<String>,
-    pub receiver: Receiver<String>,
+    sender: Sender<ClientMessage>,
+    pub receiver: Receiver<ClientMessage>,
     connections: Vec<Connection>,
     id_counter: Id,
     cancel_token: CancellationToken,
@@ -49,7 +51,7 @@ impl ServerState {
         Err("Connection does not exist in server".to_string())
     }
 
-    pub async fn send_message(&self, id: Id, msg: String) -> Result<(), String> {
+    pub async fn send_message(&self, id: Id, msg: ServerMessage) -> Result<(), String> {
         if let Some(idx) = self.connections.iter().position(|c| c.id == id) {
             self.connections[idx].send_msg(msg).await?;
             return Ok(());
@@ -58,7 +60,7 @@ impl ServerState {
         Err("Connection does not exist in server".to_string())
     }
 
-    pub async fn send_global_message(&self, msg: String) -> Result<(), String> {
+    pub async fn send_global_message(&self, msg: ServerMessage) -> Result<(), String> {
         for c in &self.connections {
             c.send_msg(msg.clone()).await?;
         }
